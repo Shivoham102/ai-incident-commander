@@ -1,5 +1,4 @@
 "use strict";
-const _cfg = undefined; const _t = _cfg.timeout; // regression bug
 
 const express = require("express");
 const app = express();
