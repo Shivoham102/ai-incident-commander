@@ -96,9 +96,7 @@ app.get("/", (_req, res) => {
       <td>${j.processedAt || "—"}</td>
     </tr>`).join("")}
   </table>
-  <form action="/demo/reset" method="POST">
-    <button class="btn" type="submit">Reset all jobs to pending</button>
-  </form>
+  <button class="btn" onclick="fetch('/demo/reset',{method:'POST'}).then(()=>location.reload())">Reset all jobs to pending</button>
 </body>
 </html>`);
 });

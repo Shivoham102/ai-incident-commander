@@ -31,13 +31,13 @@ async function poll() {
       console.log(`[worker] no pending jobs`);
       return;
     }
-    for (const job of pending) {
-      const r = await fetch(`${API_URL}/api/jobs/${job.id}/process`, { method: "POST" });
-      if (r.ok) {
-        console.log(`[worker] processed job id=${job.id} type=${job.type}`);
-      } else {
-        console.error(`[worker] failed to process job id=${job.id}: HTTP ${r.status}`);
-      }
+    // Process one job per poll so the dashboard shows gradual progress
+    const job = pending[0];
+    const r = await fetch(`${API_URL}/api/jobs/${job.id}/process`, { method: "POST" });
+    if (r.ok) {
+      console.log(`[worker] processed job id=${job.id} type=${job.type} (${pending.length - 1} remaining)`);
+    } else {
+      console.error(`[worker] failed to process job id=${job.id}: HTTP ${r.status}`);
     }
   } catch (err) {
     console.error(`[worker] fetch error: ${err.message} — Service A may be down`);
