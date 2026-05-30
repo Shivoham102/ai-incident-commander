@@ -17,15 +17,15 @@ When a Render deploy fails, the AI Incident Commander:
 ## Architecture
 
 ```
-render.onDeploy(failed) ──► Claude RCA (real logs)
-                                 ├─ AUTO_ROLLBACK ──► render.rollbackDeploy ──► resolve ──► Slack ✅
-                                 ├─ RESTART ────────► render.deploy ───────────► resolve ──► Slack ✅
-                                 └─ PAGE_HUMAN ─────────────────────────────────────────► Slack 🚨
+render.onDeploy(A failed) ──► Claude RCA (real logs)
+                                   ├─ AUTO_ROLLBACK ──► rollback API (A) ──► redeploy Worker (B) ──► Slack ✅
+                                   ├─ RESTART ────────► redeploy API (A) ──► redeploy Worker (B) ──► Slack ✅
+                                   └─ PAGE_HUMAN ──────────────────────────────────────────────────► Slack 🚨
 ```
 
-Two Render services used:
-- **Service A** (`incident-demo-api`) — the watched app; rolled back / restarted on failure
-- **Service B** (`incident-demo-canary`) — health-check target; snapshot stored to Console after each resolution
+Two Render services — **same codebase, must stay in sync**:
+- **Service A** (`incident-demo-api`) — the API; watched by `render.onDeploy`, rolled back / restarted on failure
+- **Service B** (`incident-demo-worker`) — background job worker; automatically redeployed after A is remediated to keep both on the same version
 
 ---
 
@@ -112,7 +112,7 @@ The Console shows:
 - **Avg MTTR** — average seconds-to-resolve over all auto-resolved incidents
 - **Incidents handled** — total incident count
 - **Incident Feed** — per-incident: service, Claude's AI root cause, action taken, status, MTTR
-- **Service Health (Service B)** — latest health snapshot from Service B after each resolution
+- **Worker Sync Status (Service B)** — latest redeploy status of the worker after each API remediation
 
 ---
 

@@ -65,7 +65,7 @@ spec:
     - id: health
       type: table
       content:
-        title: Service Health (Service B)
+        title: Worker Sync Status (Service B)
         dataSource:
           kind: memory
           namespace: service_health
@@ -73,11 +73,14 @@ spec:
           kind: table
           columns:
             - field: service
-              label: Service
-            - field: suspended
-              label: Suspended
-            - field: checked_ts
-              label: Last Checked
+              label: Worker
+            - field: deploy_id
+              label: Deploy ID
+            - field: status
+              label: Status
+              format: status
+            - field: synced_ts
+              label: Last Synced
               format: datetime
 
   layout:

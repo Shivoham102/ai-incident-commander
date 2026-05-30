@@ -231,33 +231,39 @@ spec:
       component: "upsertMemory"
       isCollapsed: false
 
-    # ── SERVICE B HEALTH ──────────────────────────────────────────────────────
-    - id: "health-b"
-      name: "Health Snapshot (Service B)"
+    # ── SYNC WORKER (Service B) ───────────────────────────────────────────────
+    # Service A = API, Service B = background worker — same codebase, must stay
+    # on the same version. After remediating A, redeploy B to match.
+    # Both resolve paths fan into this one node (each fires it independently).
+    - id: "sync-worker-b"
+      name: "Sync Worker (Service B)"
       type: "TYPE_ACTION"
       configuration:
         service: "REPLACE_SERVICE_B_ID"
+        clearCache: false
       position:
         x: 3200
         "y": 340
-      component: "render.getService"
+      component: "render.deploy"
       isCollapsed: false
 
     - id: "store-health"
-      name: "Store B Health"
+      name: "Store Worker Status"
       type: "TYPE_ACTION"
       configuration:
         namespace: "service_health"
         matchList:
           - name: "service"
-            value: "$['Health Snapshot (Service B)'].data.serviceId"
+            value: "REPLACE_SERVICE_B_ID"
         valueList:
           - name: "service"
-            value: "$['Health Snapshot (Service B)'].data.serviceName"
-          - name: "suspended"
-            value: "$['Health Snapshot (Service B)'].data.suspended"
-          - name: "checked_ts"
-            value: "date($['Health Snapshot (Service B)'].timestamp).Unix()"
+            value: "'incident-demo-worker'"
+          - name: "deploy_id"
+            value: "$['Sync Worker (Service B)'].data.deployId"
+          - name: "status"
+            value: "$['Sync Worker (Service B)'].data.status"
+          - name: "synced_ts"
+            value: "date($['Sync Worker (Service B)'].timestamp).Unix()"
       position:
         x: 3520
         "y": 340
@@ -423,16 +429,19 @@ spec:
     - sourceId: "do-restart"
       targetId: "mark-paged"
       channel: "failed"
-    # both resolve paths → service B health → slack ✅
+    # both resolve paths → sync worker B → store status → slack ✅
     - sourceId: "resolve-rollback"
-      targetId: "health-b"
+      targetId: "sync-worker-b"
       channel: "default"
     - sourceId: "resolve-restart"
-      targetId: "health-b"
+      targetId: "sync-worker-b"
       channel: "default"
-    - sourceId: "health-b"
+    - sourceId: "sync-worker-b"
       targetId: "store-health"
-      channel: "default"
+      channel: "success"
+    - sourceId: "sync-worker-b"
+      targetId: "store-health"
+      channel: "failed"
     - sourceId: "store-health"
       targetId: "slack-resolved"
       channel: "default"
