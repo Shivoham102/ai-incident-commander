@@ -8,10 +8,16 @@ app.use(express.json());
 
 // In-memory job queue — worker polls this and processes pending jobs
 const jobs = [
-  { id: 1, type: "email", payload: { to: "user@example.com" }, status: "pending", createdAt: new Date().toISOString() },
-  { id: 2, type: "report", payload: { reportId: "rpt-42" }, status: "pending", createdAt: new Date().toISOString() },
+  { id: 1, type: "email",     payload: { to: "alice@example.com" },   status: "pending", createdAt: new Date().toISOString() },
+  { id: 2, type: "email",     payload: { to: "bob@example.com" },     status: "pending", createdAt: new Date().toISOString() },
+  { id: 3, type: "report",    payload: { reportId: "rpt-42" },        status: "pending", createdAt: new Date().toISOString() },
+  { id: 4, type: "report",    payload: { reportId: "rpt-43" },        status: "pending", createdAt: new Date().toISOString() },
+  { id: 5, type: "export",    payload: { format: "csv", rows: 1200 }, status: "pending", createdAt: new Date().toISOString() },
+  { id: 6, type: "export",    payload: { format: "pdf", rows: 340 },  status: "pending", createdAt: new Date().toISOString() },
+  { id: 7, type: "notify",    payload: { channel: "slack" },          status: "pending", createdAt: new Date().toISOString() },
+  { id: 8, type: "cleanup",   payload: { olderThanDays: 30 },         status: "pending", createdAt: new Date().toISOString() },
 ];
-let nextId = 3;
+let nextId = 9;
 
 app.get("/healthz", (_req, res) => {
   const pending = jobs.filter((j) => j.status === "pending").length;
