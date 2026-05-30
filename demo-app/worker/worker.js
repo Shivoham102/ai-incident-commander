@@ -11,6 +11,10 @@ if (!API_URL) {
   process.exit(1);
 }
 
+// Bind a port so Render's web service health check passes
+const http = require("http");
+http.createServer((_req, res) => res.writeHead(200) && res.end("ok")).listen(process.env.PORT || 3001);
+
 console.log(`[worker] incident-demo-worker started`);
 console.log(`[worker] polling ${API_URL} every ${POLL_INTERVAL_MS / 1000}s`);
 
