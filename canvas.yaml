@@ -1,0 +1,442 @@
+metadata:
+  name: "AI Incident Commander"
+  description: "Failed Render deploy -> Claude root-cause analysis on real logs -> autonomous rollback / restart / human page. Records every incident to canvas memory for the Console (MTTR + feed)."
+  isTemplate: false
+spec:
+  nodes:
+    # ── INBOUND ──────────────────────────────────────────────────────────────
+    - id: "on-deploy-a"
+      name: "Watch Service A Deploys"
+      type: "TYPE_TRIGGER"
+      configuration:
+        service: "REPLACE_SERVICE_A_ID"
+        eventTypes:
+          - "deploy_ended"
+      position:
+        x: 0
+        "y": 400
+      component: "render.onDeploy"
+      isCollapsed: false
+
+    - id: "gate-failed"
+      name: "Deploy Failed?"
+      type: "TYPE_ACTION"
+      configuration:
+        expression: "$['Watch Service A Deploys'].data.status != 'live' && $['Watch Service A Deploys'].data.status != 'succeeded'"
+      position:
+        x: 320
+        "y": 400
+      component: "if"
+      isCollapsed: false
+
+    # false branch — healthy deploy, cache it as the rollback target
+    - id: "cache-last-good"
+      name: "Cache Last-Good Deploy"
+      type: "TYPE_ACTION"
+      configuration:
+        namespace: "last_good"
+        matchList:
+          - name: "service"
+            value: "$['Watch Service A Deploys'].data.serviceId"
+        valueList:
+          - name: "deployId"
+            value: "$['Watch Service A Deploys'].data.deployId"
+      position:
+        x: 640
+        "y": 640
+      component: "upsertMemory"
+      isCollapsed: false
+
+    # ── CONTEXT GATHER ────────────────────────────────────────────────────────
+    - id: "get-deploy"
+      name: "Fetch Deploy Context"
+      type: "TYPE_ACTION"
+      configuration:
+        service: "REPLACE_SERVICE_A_ID"
+        deployId: "{{ $['Watch Service A Deploys'].data.deployId }}"
+      position:
+        x: 640
+        "y": 300
+      component: "render.getDeploy"
+      isCollapsed: false
+
+    - id: "fetch-logs"
+      name: "Fetch Service Logs"
+      type: "TYPE_ACTION"
+      configuration:
+        method: "GET"
+        url: "https://api.render.com/v1/logs?ownerId=REPLACE_RENDER_OWNER_ID&resource={{ $['Watch Service A Deploys'].data.serviceId }}&limit=20&direction=backward"
+        authorization:
+          type: "bearer"
+          credential:
+            secretName: "RENDER_API_KEY"
+        successCodes: "200"
+        timeoutSeconds: 15
+      position:
+        x: 960
+        "y": 300
+      component: "http"
+      isCollapsed: false
+
+    - id: "find-last-good"
+      name: "Find Last-Good Deploy"
+      type: "TYPE_ACTION"
+      configuration:
+        namespace: "last_good"
+        resultMode: "latest"
+        matchList:
+          - name: "service"
+            value: "$['Watch Service A Deploys'].data.serviceId"
+      position:
+        x: 1280
+        "y": 300
+      component: "readMemory"
+      isCollapsed: false
+
+    # ── THE AI AGENT ──────────────────────────────────────────────────────────
+    - id: "ai-commander"
+      name: "AI Incident Commander"
+      type: "TYPE_ACTION"
+      configuration:
+        model: "claude-sonnet-4-6"
+        systemMessage: "You are an autonomous incident commander for Render deploys. Using the deploy status, the recent service logs, and the last known-good deploy, decide the single best remediation.\n\nYour reply's FIRST LINE must be EXACTLY one of these tokens and nothing else:\n  AUTO_ROLLBACK   - roll back to the last known-good deploy (build/runtime regression a rollback fixes)\n  RESTART         - trigger a fresh deploy / restart (transient failure: flaky build, pull timeout, OOM, dependency blip)\n  PAGE_HUMAN      - a human is needed (data/schema migration, secret/config, or no safe automatic action)\n\nAfter the token, write 2-4 sentences: the root cause and your reasoning. Prefer PAGE_HUMAN whenever a rollback or restart could make things worse."
+        prompt: "Service: {{ $['Watch Service A Deploys'].data.serviceName }}\nFailed deploy: {{ $['Watch Service A Deploys'].data.deployId }} (status: {{ $['Watch Service A Deploys'].data.status }})\nDeploy trigger/context: {{ $['Fetch Deploy Context'].data.trigger }}\nLast known-good deploy available for rollback: {{ $['Find Last-Good Deploy'].data.deployId }}\n\nRecent logs (JSON):\n{{ $['Fetch Service Logs'].data.body }}\n\nDecide: AUTO_ROLLBACK, RESTART, or PAGE_HUMAN."
+        maxTokens: 600
+      position:
+        x: 1600
+        "y": 300
+      component: "claude.textPrompt"
+      isCollapsed: false
+
+    # ── OPEN INCIDENT (post-Claude) ───────────────────────────────────────────
+    - id: "open-incident"
+      name: "Open Incident"
+      type: "TYPE_ACTION"
+      configuration:
+        namespace: "incidents"
+        matchList:
+          - name: "incident_id"
+            value: "$['Watch Service A Deploys'].data.deployId"
+        valueList:
+          - name: "incident_id"
+            value: "$['Watch Service A Deploys'].data.deployId"
+          - name: "service"
+            value: "$['Watch Service A Deploys'].data.serviceName"
+          - name: "status"
+            value: "'triaged'"
+          - name: "action"
+            value: "'pending'"
+          - name: "root_cause"
+            value: "$['AI Incident Commander'].data.text"
+          - name: "triggered_ts"
+            value: "date($['Watch Service A Deploys'].timestamp).Unix()"
+      position:
+        x: 1920
+        "y": 300
+      component: "upsertMemory"
+      isCollapsed: false
+
+    # ── DECISION GATES ────────────────────────────────────────────────────────
+    - id: "gate-rollback"
+      name: "Rollback Safe?"
+      type: "TYPE_ACTION"
+      configuration:
+        expression: "hasPrefix($['AI Incident Commander'].data.text, 'AUTO_ROLLBACK')"
+      position:
+        x: 2240
+        "y": 300
+      component: "if"
+      isCollapsed: false
+
+    - id: "gate-restart"
+      name: "Restart Instead?"
+      type: "TYPE_ACTION"
+      configuration:
+        expression: "hasPrefix($['AI Incident Commander'].data.text, 'RESTART')"
+      position:
+        x: 2240
+        "y": 540
+      component: "if"
+      isCollapsed: false
+
+    # ── ACTIONS ───────────────────────────────────────────────────────────────
+    - id: "do-rollback"
+      name: "Execute Rollback"
+      type: "TYPE_ACTION"
+      configuration:
+        service: "REPLACE_SERVICE_A_ID"
+        deployId: "{{ $['Find Last-Good Deploy'].data.deployId }}"
+      position:
+        x: 2560
+        "y": 140
+      component: "render.rollbackDeploy"
+      isCollapsed: false
+
+    - id: "do-restart"
+      name: "Execute Restart"
+      type: "TYPE_ACTION"
+      configuration:
+        service: "REPLACE_SERVICE_A_ID"
+        clearCache: true
+      position:
+        x: 2560
+        "y": 540
+      component: "render.deploy"
+      isCollapsed: false
+
+    # ── RESOLVE ───────────────────────────────────────────────────────────────
+    - id: "resolve-rollback"
+      name: "Resolve (Rollback)"
+      type: "TYPE_ACTION"
+      configuration:
+        namespace: "incidents"
+        matchList:
+          - name: "incident_id"
+            value: "$['Watch Service A Deploys'].data.deployId"
+        valueList:
+          - name: "status"
+            value: "'auto_resolved'"
+          - name: "action"
+            value: "'auto_rollback'"
+          - name: "resolved_ts"
+            value: "date($['Execute Rollback'].timestamp).Unix()"
+          - name: "mttr_seconds"
+            value: "date($['Execute Rollback'].timestamp).Unix() - date($['Watch Service A Deploys'].timestamp).Unix()"
+      position:
+        x: 2880
+        "y": 140
+      component: "upsertMemory"
+      isCollapsed: false
+
+    - id: "resolve-restart"
+      name: "Resolve (Restart)"
+      type: "TYPE_ACTION"
+      configuration:
+        namespace: "incidents"
+        matchList:
+          - name: "incident_id"
+            value: "$['Watch Service A Deploys'].data.deployId"
+        valueList:
+          - name: "status"
+            value: "'auto_resolved'"
+          - name: "action"
+            value: "'auto_restart'"
+          - name: "resolved_ts"
+            value: "date($['Execute Restart'].timestamp).Unix()"
+          - name: "mttr_seconds"
+            value: "date($['Execute Restart'].timestamp).Unix() - date($['Watch Service A Deploys'].timestamp).Unix()"
+      position:
+        x: 2880
+        "y": 540
+      component: "upsertMemory"
+      isCollapsed: false
+
+    # ── SERVICE B HEALTH ──────────────────────────────────────────────────────
+    - id: "health-b"
+      name: "Health Snapshot (Service B)"
+      type: "TYPE_ACTION"
+      configuration:
+        service: "REPLACE_SERVICE_B_ID"
+      position:
+        x: 3200
+        "y": 340
+      component: "render.getService"
+      isCollapsed: false
+
+    - id: "store-health"
+      name: "Store B Health"
+      type: "TYPE_ACTION"
+      configuration:
+        namespace: "service_health"
+        matchList:
+          - name: "service"
+            value: "$['Health Snapshot (Service B)'].data.serviceId"
+        valueList:
+          - name: "service"
+            value: "$['Health Snapshot (Service B)'].data.serviceName"
+          - name: "suspended"
+            value: "$['Health Snapshot (Service B)'].data.suspended"
+          - name: "checked_ts"
+            value: "date($['Health Snapshot (Service B)'].timestamp).Unix()"
+      position:
+        x: 3520
+        "y": 340
+      component: "upsertMemory"
+      isCollapsed: false
+
+    - id: "slack-resolved"
+      name: "Slack: Resolved"
+      type: "TYPE_ACTION"
+      configuration:
+        channel: "REPLACE_SLACK_CHANNEL_ID"
+        text: "✅ *Incident auto-resolved* for {{ $['Watch Service A Deploys'].data.serviceName }}\n\nThe AI Incident Commander remediated deploy `{{ $['Watch Service A Deploys'].data.deployId }}` automatically.\n\n*Root cause:* {{ $['AI Incident Commander'].data.text }}"
+      position:
+        x: 3840
+        "y": 340
+      component: "slack.sendTextMessage"
+      isCollapsed: false
+
+    # ── PAGE HUMAN (post-Claude paths) ────────────────────────────────────────
+    - id: "mark-paged"
+      name: "Mark Needs-Human"
+      type: "TYPE_ACTION"
+      configuration:
+        namespace: "incidents"
+        matchList:
+          - name: "incident_id"
+            value: "$['Watch Service A Deploys'].data.deployId"
+        valueList:
+          - name: "incident_id"
+            value: "$['Watch Service A Deploys'].data.deployId"
+          - name: "service"
+            value: "$['Watch Service A Deploys'].data.serviceName"
+          - name: "status"
+            value: "'needs_human'"
+          - name: "action"
+            value: "'paged'"
+          - name: "root_cause"
+            value: "$['AI Incident Commander'].data.text"
+          - name: "triggered_ts"
+            value: "date($['Watch Service A Deploys'].timestamp).Unix()"
+      position:
+        x: 2560
+        "y": 860
+      component: "upsertMemory"
+      isCollapsed: false
+
+    - id: "slack-page"
+      name: "Slack: Page Human"
+      type: "TYPE_ACTION"
+      configuration:
+        channel: "REPLACE_SLACK_CHANNEL_ID"
+        text: "🚨 *Human needed* — {{ $['Watch Service A Deploys'].data.serviceName }} deploy `{{ $['Watch Service A Deploys'].data.deployId }}` failed and the AI Incident Commander did not auto-remediate.\n\n*Assessment:* {{ $['AI Incident Commander'].data.text }}\n\nPlease investigate."
+      position:
+        x: 2880
+        "y": 860
+      component: "slack.sendTextMessage"
+      isCollapsed: false
+
+    # ── COLD-START BRANCH (notFound — no prior green deploy cached) ───────────
+    # Static copy only — must NOT reference $['AI Incident Commander'] (never ran).
+    - id: "open-incident-cold"
+      name: "Open Incident (No Target)"
+      type: "TYPE_ACTION"
+      configuration:
+        namespace: "incidents"
+        matchList:
+          - name: "incident_id"
+            value: "$['Watch Service A Deploys'].data.deployId"
+        valueList:
+          - name: "incident_id"
+            value: "$['Watch Service A Deploys'].data.deployId"
+          - name: "service"
+            value: "$['Watch Service A Deploys'].data.serviceName"
+          - name: "status"
+            value: "'needs_human'"
+          - name: "action"
+            value: "'paged'"
+          - name: "root_cause"
+            value: "'No known-good deploy on record to roll back to. A human must ship a fix.'"
+          - name: "triggered_ts"
+            value: "date($['Watch Service A Deploys'].timestamp).Unix()"
+      position:
+        x: 1280
+        "y": 620
+      component: "upsertMemory"
+      isCollapsed: false
+
+    - id: "slack-cold"
+      name: "Slack: No Rollback Target"
+      type: "TYPE_ACTION"
+      configuration:
+        channel: "REPLACE_SLACK_CHANNEL_ID"
+        text: "🚨 *Human needed* — {{ $['Watch Service A Deploys'].data.serviceName }} deploy `{{ $['Watch Service A Deploys'].data.deployId }}` failed and there is *no known-good deploy on record* to roll back to. A human must ship a fix."
+      position:
+        x: 1600
+        "y": 620
+      component: "slack.sendTextMessage"
+      isCollapsed: false
+
+  edges:
+    # inbound → fail gate
+    - sourceId: "on-deploy-a"
+      targetId: "gate-failed"
+      channel: "default"
+    # healthy deploy → cache last-good (terminal)
+    - sourceId: "gate-failed"
+      targetId: "cache-last-good"
+      channel: "false"
+    # failed deploy → context gather
+    - sourceId: "gate-failed"
+      targetId: "get-deploy"
+      channel: "true"
+    - sourceId: "get-deploy"
+      targetId: "fetch-logs"
+      channel: "default"
+    # logs best-effort: both outcomes proceed to readMemory
+    - sourceId: "fetch-logs"
+      targetId: "find-last-good"
+      channel: "success"
+    - sourceId: "fetch-logs"
+      targetId: "find-last-good"
+      channel: "failure"
+    # last-good found → agent; not found → cold-start page
+    - sourceId: "find-last-good"
+      targetId: "ai-commander"
+      channel: "found"
+    - sourceId: "find-last-good"
+      targetId: "open-incident-cold"
+      channel: "notFound"
+    - sourceId: "open-incident-cold"
+      targetId: "slack-cold"
+      channel: "default"
+    # agent → open incident → decision gates
+    - sourceId: "ai-commander"
+      targetId: "open-incident"
+      channel: "default"
+    - sourceId: "open-incident"
+      targetId: "gate-rollback"
+      channel: "default"
+    - sourceId: "gate-rollback"
+      targetId: "do-rollback"
+      channel: "true"
+    - sourceId: "gate-rollback"
+      targetId: "gate-restart"
+      channel: "false"
+    - sourceId: "gate-restart"
+      targetId: "do-restart"
+      channel: "true"
+    - sourceId: "gate-restart"
+      targetId: "mark-paged"
+      channel: "false"
+    # rollback outcome
+    - sourceId: "do-rollback"
+      targetId: "resolve-rollback"
+      channel: "success"
+    - sourceId: "do-rollback"
+      targetId: "mark-paged"
+      channel: "failed"
+    # restart outcome
+    - sourceId: "do-restart"
+      targetId: "resolve-restart"
+      channel: "success"
+    - sourceId: "do-restart"
+      targetId: "mark-paged"
+      channel: "failed"
+    # both resolve paths → service B health → slack ✅
+    - sourceId: "resolve-rollback"
+      targetId: "health-b"
+      channel: "default"
+    - sourceId: "resolve-restart"
+      targetId: "health-b"
+      channel: "default"
+    - sourceId: "health-b"
+      targetId: "store-health"
+      channel: "default"
+    - sourceId: "store-health"
+      targetId: "slack-resolved"
+      channel: "default"
+    # page path
+    - sourceId: "mark-paged"
+      targetId: "slack-page"
+      channel: "default"

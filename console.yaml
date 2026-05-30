@@ -1,0 +1,103 @@
+apiVersion: v1
+kind: Console
+metadata:
+  name: AI Incident Commander
+spec:
+  panels:
+    - id: mttr
+      type: number
+      content:
+        title: Avg MTTR
+        dataSource:
+          kind: memory
+          namespace: incidents
+        render:
+          kind: number
+          aggregation: avg
+          field: mttr_seconds
+          format: duration
+          label: Avg MTTR
+
+    - id: total
+      type: number
+      content:
+        title: Incidents
+        dataSource:
+          kind: memory
+          namespace: incidents
+        render:
+          kind: number
+          aggregation: count
+          label: Incidents handled
+
+    - id: feed
+      type: table
+      content:
+        title: Incident Feed
+        dataSource:
+          kind: memory
+          namespace: incidents
+        render:
+          kind: table
+          columns:
+            - field: incident_id
+              label: Deploy ID
+            - field: service
+              label: Service
+            - field: status
+              label: Status
+              format: status
+            - field: action
+              label: Action
+              format: badge
+            - field: root_cause
+              label: AI Root Cause
+            - field: triggered_ts
+              label: Started
+              format: datetime
+            - field: mttr_seconds
+              label: MTTR
+              format: duration
+          sort:
+            field: triggered_ts
+            order: desc
+
+    - id: health
+      type: table
+      content:
+        title: Service Health (Service B)
+        dataSource:
+          kind: memory
+          namespace: service_health
+        render:
+          kind: table
+          columns:
+            - field: service
+              label: Service
+            - field: suspended
+              label: Suspended
+            - field: checked_ts
+              label: Last Checked
+              format: datetime
+
+  layout:
+    - i: mttr
+      x: 0
+      y: 0
+      w: 4
+      h: 2
+    - i: total
+      x: 4
+      y: 0
+      w: 4
+      h: 2
+    - i: feed
+      x: 0
+      y: 2
+      w: 12
+      h: 8
+    - i: health
+      x: 0
+      y: 10
+      w: 6
+      h: 4
