@@ -23,9 +23,9 @@ render.onDeploy(A failed) ──► Claude RCA (real logs)
                                    └─ PAGE_HUMAN ──────────────────────────────────────────────────► Slack 🚨
 ```
 
-Two Render services — **same codebase, must stay in sync**:
-- **Service A** (`incident-demo-api`) — the API; watched by `render.onDeploy`, rolled back / restarted on failure
-- **Service B** (`incident-demo-worker`) — background job worker; automatically redeployed after A is remediated to keep both on the same version
+Two Render services — **real producer/consumer pair**:
+- **Service A** (`incident-demo-api`) — job queue HTTP API (`demo-app/api/`); watched by `render.onDeploy`, rolled back / restarted on failure
+- **Service B** (`incident-demo-worker`) — background worker (`demo-app/worker/`); polls Service A's `/api/jobs` every 5s, processes pending jobs; automatically redeployed after A is remediated
 
 ---
 
@@ -33,18 +33,27 @@ Two Render services — **same codebase, must stay in sync**:
 
 ### 1. Render — deploy two services
 
-Deploy `demo-app/` **twice** on [render.com](https://render.com) (free tier):
+Deploy from the same repo `Shivoham102/ai-incident-commander` using different root directories:
 
-| Service | Name suggestion | Role |
-|---|---|---|
-| Service A | `incident-demo-api` | Watched + rollback/restart target |
-| Service B | `incident-demo-canary` | Health-check snapshot target |
+**Service A — `incident-demo-api`**
+| Setting | Value |
+|---|---|
+| Root Directory | `demo-app/api` |
+| Build Command | `npm install` |
+| Start Command | `node server.js` |
+| Instance Type | Free |
+| Health Check | `/healthz` |
 
-For both: **Environment** = Node, **Build Command** = `npm install`, **Start Command** = `node server.js`.
+**Service B — `incident-demo-worker`**
+| Setting | Value |
+|---|---|
+| Root Directory | `demo-app/worker` |
+| Build Command | `npm install` |
+| Start Command | `node worker.js` |
+| Instance Type | Free |
+| Env var | `WORKER_API_URL` = `https://incident-demo-api.onrender.com` (Service A's URL) |
 
-Note:
-- Both **service IDs** (format: `srv-…`)
-- Your **owner ID** (format: `own-…`, visible in the Render API or dashboard URL)
+Note both **service IDs** (`srv-…`) and your **owner ID** (`own-…`, visible in the Render dashboard URL).
 
 ### 2. SuperPlane — integrations + secret
 
@@ -88,11 +97,11 @@ Wait for Service A's deploy to show **Live** in Render dashboard.
 
 ### Fire the three paths
 
-| Command | Failure injected | Expected Claude verdict |
-|---|---|---|
-| `./scripts/break-deploy.sh regression` | Boot crash — `TypeError` | `AUTO_ROLLBACK` → rollback to last-good |
-| `./scripts/break-deploy.sh transient` | Build/boot `ECONNRESET` | `RESTART` → fresh deploy with cache clear |
-| `./scripts/break-deploy.sh migration` | Schema mismatch — DB migration pending | `PAGE_HUMAN` → Slack 🚨 |
+| Command | Real crash injected | Real log Claude reads | Expected verdict |
+|---|---|---|---|
+| `./scripts/break-deploy.sh regression` | `undefined.timeout` access at startup | `TypeError: Cannot read properties of undefined (reading 'timeout')` + stack trace | `AUTO_ROLLBACK` |
+| `./scripts/break-deploy.sh transient` | `require('pg')` (not in package.json) | `Error: Cannot find module 'pg'` | `RESTART` |
+| `./scripts/break-deploy.sh migration` | Missing `DATABASE_URL` env check | `FATAL: DATABASE_URL not set — run database migrations before deploying this version` | `PAGE_HUMAN` |
 
 After each `break-deploy.sh`:
 1. Watch the SuperPlane canvas execute in real time
@@ -132,12 +141,16 @@ Switch model to `claude-haiku-4-5` in the canvas to halve cost further.
 ## Files
 
 ```
-canvas.yaml          SuperPlane Canvas — 21-node incident automation flow
-console.yaml         SuperPlane Console — MTTR + incident feed + service health
-demo-app/            Minimal Node/Express service deployed to Render
-  package.json
-  server.js          FAIL_MODE-driven failures for deterministic demos
+canvas.yaml               SuperPlane Canvas — 21-node incident automation flow
+console.yaml              SuperPlane Console — MTTR + incident feed + worker status
+demo-app/
+  api/                    Service A — job queue HTTP API (watched by SuperPlane)
+    package.json
+    server.js             GET /healthz, GET/POST /api/jobs, POST /api/jobs/:id/process
+  worker/                 Service B — job consumer (polls Service A every 5s)
+    package.json
+    worker.js             Requires WORKER_API_URL env var pointing at Service A
 scripts/
-  break-deploy.sh    Push a failure-mode commit to trigger an incident
-  fix-deploy.sh      Restore green state + seed last_good rollback target
+  break-deploy.sh         Inject a real crash into api/server.js and push
+  fix-deploy.sh           Restore clean api/server.js and push (seeds last_good)
 ```

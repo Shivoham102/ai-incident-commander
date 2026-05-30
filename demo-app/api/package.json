@@ -1,11 +1,10 @@
 {
   "name": "incident-demo-api",
   "version": "1.0.0",
-  "description": "Demo Render service for AI Incident Commander hackathon app",
+  "description": "Job queue API — Service A for AI Incident Commander demo",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "build": "echo 'No build step required'"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2"

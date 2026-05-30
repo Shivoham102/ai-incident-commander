@@ -1,0 +1,13 @@
+{
+  "name": "incident-demo-worker",
+  "version": "1.0.0",
+  "description": "Job queue worker — Service B for AI Incident Commander demo",
+  "main": "worker.js",
+  "scripts": {
+    "start": "node worker.js"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}

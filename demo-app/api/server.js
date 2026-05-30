@@ -1,16 +1,3 @@
-#!/usr/bin/env bash
-# fix-deploy.sh
-#
-# Restores demo-app/api/server.js to a clean healthy state and pushes.
-# Run this ONCE before any demo to seed the last_good rollback target,
-# and again after each break-deploy to reset for the next demo run.
-set -euo pipefail
-
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SERVER="$REPO_ROOT/demo-app/api/server.js"
-
-# Restore clean server.js — removes any injected crash lines
-cat > "$SERVER" << 'SERVEREOF'
 "use strict";
 
 const express = require("express");
@@ -58,17 +45,3 @@ app.listen(PORT, () => {
   console.log(`[api] incident-demo-api listening on port ${PORT}`);
   console.log(`[api] ${jobs.length} jobs pre-loaded — worker should connect to process them`);
 });
-SERVEREOF
-
-cd "$REPO_ROOT"
-git add demo-app/api/server.js
-git commit -m "fix: restore healthy API baseline"
-git push
-
-echo ""
-echo "Pushed healthy commit to Service A."
-echo "Wait ~2 min for Render to show Deployed, then verify:"
-echo "  curl https://<your-service-a>.onrender.com/healthz"
-echo ""
-echo "Once deployed, the successful deploy seeds last_good in canvas memory."
-echo "You are now ready to run: ./scripts/break-deploy.sh <regression|transient|migration>"
