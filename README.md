@@ -1,6 +1,6 @@
 # AI Incident Commander
 
-[![Launch in SuperPlane](http://superplane.com/badges/launch-in-superplane.svg)](http://app.superplane.com/install?repo=github.com/REPLACE_GITHUB_OWNER/ai-incident-commander)
+[![Launch in SuperPlane](http://superplane.com/badges/launch-in-superplane.svg)](http://app.superplane.com/install?repo=github.com/Shivoham102/ai-incident-commander)
 
 > **Replace `REPLACE_GITHUB_OWNER`** with your GitHub username/org in the badge URL above before submitting.
 
